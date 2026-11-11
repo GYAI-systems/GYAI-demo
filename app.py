@@ -33,7 +33,7 @@ with tab1:
             "SKU": ["PROD-01", "PROD-02", "PROD-03"],
             "Producto": ["Laptop Pro 15", "Monitor 27 UHD", "Teclado Mecánico"],
             "Precio_USD": [1200.00, 350.00, 85.50],
-            "Stock_Disponible": [15, 0, 42]
+            "Stock_Disponible": [15, 0, 42],
             "Estado_Auditoria": ["✅ Validado", "⚠️ Sin Stock", "✅ Validado"]
         })
         with col2:

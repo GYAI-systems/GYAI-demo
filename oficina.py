@@ -50,7 +50,7 @@ def consultar_secretario(prompt_usuario, instrucciones_rol):
         return "⚠️ Falta configurar GEMINI_API_KEY en los Secrets de Streamlit."
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             contents=prompt_usuario,
             config=types.GenerateContentConfig(
                 system_instruction=instrucciones_rol,

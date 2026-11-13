@@ -1,0 +1,36 @@
+name: Ejecutar Agente 24/7 GYAI
+
+on:
+  schedule:
+    - cron: '45 10 * * *'  # Todos los días a las 10:45 UTC (5:45 AM hora Perú)
+  workflow_dispatch:        # Permite ejecutarlo manualmente desde la pestaña Actions
+
+jobs:
+  ejecutar-agente:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Clonar el repositorio
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      # 2. Configurar Python 3.11
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. Instalar las dependencias necesarias
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install google-genai
+
+      # 4. Ejecutar el script del agente pasando los secretos como variables de entorno
+      - name: Ejecutar agente_24_7.py
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: |
+          python agente_24_7.py

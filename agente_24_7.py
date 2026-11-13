@@ -40,7 +40,7 @@ Estructura tu respuesta incluyendo títulos claros ("### Mercado Hispano (Jorge)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 response = client.models.generate_content(
-    model="gemini-4-argon",
+    model="gemini-3.8-flash",
     contents=prompt,
     config=types.GenerateContentConfig(
         temperature=0.4,

@@ -29,7 +29,7 @@ Finalicen el reporte con un resumen ejecutivo de prioridades para la jornada de 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 response = client.models.generate_content(
-    model="gemini-3.8-flash-lite",
+    model="gemini-3.8-flash",
     contents=prompt,
     config=types.GenerateContentConfig(
         tools=[{"google_search": {}}],

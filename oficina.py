@@ -51,7 +51,7 @@ gemini_keys = [
         st.secrets.get("GEMINI_API_KEY_3", ""),
     ] if k
 ]
-groq_key = st.secrets.get("GROQ_API_KEY", "")
+groq_key = st.secrets.get("GROQ_API_KEY", "").strip()
 
 def llamar_groq(prompt_usuario, instrucciones_rol, api_key_groq):
     url = "https://groq.com"
@@ -64,26 +64,39 @@ def llamar_groq(prompt_usuario, instrucciones_rol, api_key_groq):
         "temperature": 0.7,
         "max_tokens": 1024
     }
+    data_bytes = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
-        data=json.dumps(payload).encode("utf-8"),
+        data=data_bytes,
         headers={
             "Authorization": f"Bearer {api_key_groq}",
             "Content-Type": "application/json",
-            "User-Agent": "GYAI-Office/1.0"
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0"
         },
         method="POST"
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-        return data["choices"][0]["message"]["content"]
+        raw = resp.read().decode("utf-8")
+        parsed = json.loads(raw)
+        choices = parsed.get("choices")
+        first_choice = choices.pop(0)
+        return first_choice.get("message").get("content")
 
 def consultar_secretario(prompt_usuario, instrucciones_rol):
     errores = []
-    modelos_gemini = ["gemini-3.8-flash-lite", "gemini-3.8-flash", "gemini-2.5-flash"]
 
+    # 1. Groq como motor principal ultra-rápido (0.5 seg, 14,400 usos/día gratis)
+    if groq_key:
+        try:
+            return llamar_groq(prompt_usuario, instrucciones_rol, groq_key)
+        except Exception as e:
+            errores.append(f"Groq: {str(e)}")
+
+    # 2. Respaldo con todas las claves y modelos de Gemini
+    modelos_gemini = ["gemini-3.8-flash-lite", "gemini-3.8-flash", "gemini-2.5-flash"]
     for idx, key in enumerate(gemini_keys):
-        client = genai.Client(api_key=key, http_options={"timeout": 12000})
+        client = genai.Client(api_key=key.strip(), http_options={"timeout": 12000})
         for modelo in modelos_gemini:
             try:
                 response = client.models.generate_content(
@@ -100,19 +113,11 @@ def consultar_secretario(prompt_usuario, instrucciones_rol):
                 errores.append(f"Key{idx+1}/{modelo}: {str(e)[:60]}")
                 continue
 
-    if groq_key:
-        try:
-            return llamar_groq(prompt_usuario, instrucciones_rol, groq_key)
-        except Exception as e:
-            errores.append(f"Groq: {str(e)[:60]}")
-
     if not gemini_keys and not groq_key:
-        return "⚠️ Falta configurar GEMINI_API_KEY o GROQ_API_KEY en los Secrets de Streamlit."
+        return "⚠️ Falta configurar GROQ_API_KEY o GEMINI_API_KEY en los Secrets de Streamlit."
 
     return (
-        "⚠️ Todos los motores gratuitos llegaron a su límite temporal en este minuto. "
-        "Agrega una segunda clave (`GEMINI_API_KEY_2`) o una clave gratuita de Groq (`GROQ_API_KEY`) "
-        "en los Secrets de Streamlit para capacidad ilimitada.\n\n"
+        "⚠️ Todos los motores gratuitos llegaron a su límite temporal en este minuto.\n\n"
         f"Detalle técnico: {' | '.join(errores[:2])}"
     )
 
@@ -130,10 +135,10 @@ try:
     <div style="position: relative; max-width: 750px; margin: auto; border-radius: 16px; overflow: hidden; border: 2px solid #00F5D4; box-shadow: 0 0 25px rgba(0, 245, 212, 0.25);">
         <img src="data:image/jpeg;base64,{img_base64}" style="width: 100%; display: block;">
         <div style="position: absolute; top: 12px; left: 12px; background: rgba(6,11,25,0.85); padding: 5px 12px; border-radius: 20px; border: 1px solid #10B981; font-size: 12px;">
-            🟢 <b>JORGE GYAI:</b> En línea (Motor Híbrido Activo)
+            🟢 <b>JORGE GYAI:</b> En línea (Motor Turbo Activo)
         </div>
         <div style="position: absolute; top: 12px; right: 12px; background: rgba(6,11,25,0.85); padding: 5px 12px; border-radius: 20px; border: 1px solid #10B981; font-size: 12px;">
-            🟢 <b>JAMES GYAI:</b> En línea (Motor Híbrido Activo)
+            🟢 <b>JAMES GYAI:</b> En línea (Motor Turbo Activo)
         </div>
     </div>
     ''', unsafe_allow_html=True)
@@ -193,7 +198,7 @@ elif st.session_state.escritorio_activo == "James GYAI":
                 rol_james = (
                     "You are James GYAI, Executive Global Sales Secretary at GYAI (Growth & Yield AI), founded by Dhianays. "
                     "Your specialty is high-ticket B2B outreach in English for service businesses in the UAE (Dubai/Abu Dhabi), Singapore, US, Canada, and Europe. "
-                    "Write sharp, persuasive, ROI-focused outreach messages designed to book discovery demos and land GYAI's first 3 global clients. Always respond in English."
+                    "Write sharp, persuasive, ROI-focused outreach messages designed to book discovery demos and land GYAI's global clients. Always respond in English."
                 )
                 st.session_state.respuesta_james = consultar_secretario(orden_ja, rol_james)
         else:
@@ -206,7 +211,7 @@ else:
     st.markdown('''
     <div class="panel-agente" style="border-color:#00F5D4;">
         <h4 style="color:#00F5D4; margin:0;">🏛️ Recepción & Pasillo Central — GYAI (Growth & Yield AI)</h4>
-        <p style="font-size:13px; color:#CBD5E1; margin-top:5px;"><b>Estado de la Fábrica:</b> 2 Secretarios con Motor Híbrido Activo | Simulador: <code>gyai-demo.streamlit.app</code></p>
+        <p style="font-size:13px; color:#CBD5E1; margin-top:5px;"><b>Estado de la Fábrica:</b> 2 Secretarios con Motor Turbo Activo | Simulador: <code>gyai-demo.streamlit.app</code></p>
         <p style="font-size:13px; color:#10B981;"><b>Meta actual:</b> Alcanzar $10,000 USD/mes cerrando clientes globales.</p>
     </div>
     ''', unsafe_allow_html=True)

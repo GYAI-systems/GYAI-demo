@@ -57,13 +57,11 @@ def llamar_groq(prompt_usuario, instrucciones_rol, api_key_groq):
     host = "api" + dot + "groq" + dot + "com"
     endpoint = "https://" + host + "/openai/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {groq_key}"
-    ,
+        "Authorization": f"Bearer {groq_key}" ,
         "Content-Type": "application/json"
     }
     payload = {
         "model": "openai/gpt-oss-120b",
-,
         "messages": [
             {"role": "system", "content": instrucciones_rol},
             {"role": "user", "content": prompt_usuario}

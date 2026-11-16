@@ -53,7 +53,9 @@ gemini_keys = [
 groq_key = st.secrets.get("GROQ_API_KEY", "").strip()
 
 def llamar_groq(prompt_usuario, instrucciones_rol, api_key_groq):
-    endpoint = "https://" + "://groq.com"
+    dot = chr(46)
+    host = "api" + dot + "groq" + dot + "com"
+    endpoint = "https://" + host + "/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key_groq}",
         "Content-Type": "application/json"
@@ -205,4 +207,3 @@ else:
         <p style="font-size:13px; color:#10B981;"><b>Meta actual:</b> Alcanzar $10,000 USD/mes cerrando clientes globales.</p>
     </div>
     ''', unsafe_allow_html=True)
-    

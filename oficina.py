@@ -1,7 +1,6 @@
 import streamlit as st
 import base64
-import urllib.request
-import json
+import requests
 from google import genai
 from google.genai import types
 
@@ -54,7 +53,11 @@ gemini_keys = [
 groq_key = st.secrets.get("GROQ_API_KEY", "").strip()
 
 def llamar_groq(prompt_usuario, instrucciones_rol, api_key_groq):
-    url = "https://groq.com"
+    endpoint = "https://" + "://groq.com"
+    headers = {
+        "Authorization": f"Bearer {api_key_groq}",
+        "Content-Type": "application/json"
+    }
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": [
@@ -64,36 +67,23 @@ def llamar_groq(prompt_usuario, instrucciones_rol, api_key_groq):
         "temperature": 0.7,
         "max_tokens": 1024
     }
-    data_bytes = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data_bytes,
-        headers={
-            "Authorization": f"Bearer {api_key_groq}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0"
-        },
-        method="POST"
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        raw = resp.read().decode("utf-8")
-        parsed = json.loads(raw)
-        choices = parsed.get("choices")
-        first_choice = choices.pop(0)
-        return first_choice.get("message").get("content")
+    resp = requests.post(endpoint, headers=headers, json=payload, timeout=15)
+    if resp.status_code != 200:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text[:120]}")
+    data = resp.json()
+    choices = data.get("choices")
+    first = choices.pop(0)
+    return first.get("message").get("content")
 
 def consultar_secretario(prompt_usuario, instrucciones_rol):
     errores = []
 
-    # 1. Groq como motor principal ultra-rápido (0.5 seg, 14,400 usos/día gratis)
     if groq_key:
         try:
             return llamar_groq(prompt_usuario, instrucciones_rol, groq_key)
         except Exception as e:
             errores.append(f"Groq: {str(e)}")
 
-    # 2. Respaldo con todas las claves y modelos de Gemini
     modelos_gemini = ["gemini-3.8-flash-lite", "gemini-3.8-flash", "gemini-2.5-flash"]
     for idx, key in enumerate(gemini_keys):
         client = genai.Client(api_key=key.strip(), http_options={"timeout": 12000})
@@ -117,7 +107,7 @@ def consultar_secretario(prompt_usuario, instrucciones_rol):
         return "⚠️ Falta configurar GROQ_API_KEY o GEMINI_API_KEY en los Secrets de Streamlit."
 
     return (
-        "⚠️ Todos los motores gratuitos llegaron a su límite temporal en este minuto.\n\n"
+        "⚠️ No se pudo conectar con los motores en este momento.\n\n"
         f"Detalle técnico: {' | '.join(errores[:2])}"
     )
 

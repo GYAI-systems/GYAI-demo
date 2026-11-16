@@ -1,172 +1,224 @@
-from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
-import os
-import smtplib
+import streamlit as st
+import base64
+import requests
 from google import genai
 from google.genai import types
 
-# 1. Configurar fecha actual exacta en hora de Perú (UTC-5)
-peru_timezone = timezone(timedelta(hours=-5))
-fecha_actual = datetime.now(peru_timezone).strftime("%d/%m/%Y")
+st.set_page_config(page_title="Sede Central GYAI", page_icon="🏢", layout="wide")
 
-# 2. Cargar variables de entorno
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-EMAIL_USER = os.environ.get("EMAIL_USER")
-EMAIL_PASS = os.environ.get("EMAIL_PASS")
+st.markdown('''
+<style>
+.stApp { background-color: #060B19; color: #FFFFFF; }
+.block-container { padding-top: 0.8rem; padding-bottom: 1rem; }
+div[data-testid="stButton"] button {
+    background-color: #0F172A;
+    color: #00F5D4;
+    border: 1.5px solid #00F5D4;
+    border-radius: 10px;
+    font-weight: bold;
+    transition: 0.3s;
+}
+div[data-testid="stButton"] button:hover {
+    background-color: #00F5D4;
+    color: #060B19;
+}
+.panel-agente {
+    background-color: #0F172A;
+    border: 1px solid #38BDF8;
+    border-radius: 12px;
+    padding: 15px;
+    margin-top: 10px;
+    margin-bottom: 15px;
+}
+.respuesta-ia {
+    background-color: #0B1120;
+    border-left: 4px solid #00F5D4;
+    border-radius: 8px;
+    padding: 15px;
+    margin-top: 12px;
+    color: #F8FAFC;
+    font-size: 14px;
+    line-height: 1.5;
+}
+</style>
+''', unsafe_allow_html=True)
 
-# 3. Definir el prompt estructurado para Jorge y James
-prompt = f"""
-Actúen como Jorge y James, Directores Comerciales de GYAI. Fecha actual del reporte: {fecha_actual}. 
-Su misión es generar una prospección comercial estratégica enfocada estrictamente en empresas medianas y negocios locales en expansión de cierre rápido (donde el dueño o gerente decide en 24 a 48 horas), ideales para conseguir clientes antes del lunes.
+gemini_keys = [
+    k for k in [
+        st.secrets.get("GEMINI_API_KEY", ""),
+        st.secrets.get("GEMINI_API_KEY_2", ""),
+        st.secrets.get("GEMINI_API_KEY_3", ""),
+    ] if k
+]
+groq_key = st.secrets.get("GROQ_API_KEY", "").strip()
 
-Debes generar el contenido utilizando etiquetas HTML de tabla (`<table>`, `<tr>`, `<th>`, `<td>`) para dos tablas separadas:
-1. Tabla 1: Mercado Hispano (5 prospectos gestionados por Jorge - Latinoamérica y España).
-2. Tabla 2: Mercado Inglés (5 prospectos gestionados por James - EE.UU., Reino Unido, Canadá).
+def llamar_groq(prompt_usuario, instrucciones_rol, api_key_groq):
+    dot = chr(46)
+    base = "https://api" + dot + "groq" + dot + "com/openai/v1"
+    headers = {
+        "Authorization": f"Bearer {api_key_groq}",
+        "Content-Type": "application/json"
+    }
+    # Consulta automática de modelos activos en tu cuenta Groq hoy
+    modelos = []
+    try:
+        r_mod = requests.get(base + "/models", headers=headers, timeout=8)
+        if r_mod.status_code == 200:
+            for item in r_mod.json().get("data", []):
+                mid = item.get("id", "")
+                if mid and not any(x in mid.lower() for x in ["whisper", "guard", "tts", "playai", "embed"]):
+                    modelos.append(mid)
+    except Exception:
+        pass
 
-Cada tabla debe tener exactamente estas 6 columnas en el orden indicado:
-- Columna 1: Nombre de la empresa o perfil específico de negocio
-- Columna 2: A quién contactar (cargo exacto del tomador de decisiones)
-- Columna 3: Qué están comprando o invirtiendo actualmente
-- Columna 4: Rubro y país
-- Columna 5: Qué tipo de agente de IA anda necesitando exactamente
-- Columna 6: Enlace directo a LinkedIn. Incluye un botón HTML con este formato exacto:
-  <a href="https://www.linkedin.com/search/results/people/?keywords=CARGO%20RUBRO%20PAIS" target="_blank" style="background-color: #0a66c2; color: white; padding: 6px 10px; text-decoration: none; border-radius: 4px; display: inline-block; font-size: 11px; font-weight: bold;">Buscar en LinkedIn</a>
-  (Reemplaza CARGO, RUBRO y PAIS con los términos clave reales de cada fila, usando %20 para los espacios).
+    if not modelos:
+        modelos = ["llama-3.1-8b-instant", "openai/gpt-oss-120b", "qwen/qwen3-32b"]
 
-Estructura tu respuesta incluyendo títulos claros ("### Mercado Hispano (Jorge)" y "### Mercado Inglés (James)") seguidos de sus respectivas tablas HTML limpias.
-"""
+    ultimo_error = ""
+    for modelo in modelos:
+        payload = {
+            "model": modelo,
+            "messages": [
+                {"role": "system", "content": instrucciones_rol},
+                {"role": "user", "content": prompt_usuario}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 1024
+        }
+        resp = requests.post(base + "/chat/completions", headers=headers, json=payload, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            choices = data.get("choices")
+            first = choices.pop(0)
+            return first.get("message").get("content")
+        ultimo_error = f"{modelo} -> HTTP {resp.status_code}"
 
-# 4. Inicializar el cliente de Gemini y ejecutar la consulta (sin herramientas externas)
-client = genai.Client(api_key=GEMINI_API_KEY)
+    raise Exception(ultimo_error)
 
-response = client.models.generate_content(
-    model="gemini-2.0-flash",
-    contents=prompt,
-    config=types.GenerateContentConfig(
-        temperature=0.4,
-    ),
-)
+def consultar_secretario(prompt_usuario, instrucciones_rol):
+    errores = []
 
-reporte_html_generado = response.text
+    if groq_key:
+        try:
+            return llamar_groq(prompt_usuario, instrucciones_rol, groq_key)
+        except Exception as e:
+            errores.append(f"Groq: {str(e)}")
 
-# 5. Construir el correo con diseño HTML profesional tipo Excel (compatible con Android)
-destinatario = "yanixamalave6@gmail.com"
+    modelos_gemini = ["gemini-3.8-flash-lite", "gemini-3.8-flash", "gemini-2.5-flash"]
+    for idx, key in enumerate(gemini_keys):
+        client = genai.Client(api_key=key.strip(), http_options={"timeout": 12000})
+        for modelo in modelos_gemini:
+            try:
+                response = client.models.generate_content(
+                    model=modelo,
+                    contents=prompt_usuario,
+                    config=types.GenerateContentConfig(
+                        system_instruction=instrucciones_rol,
+                        temperature=0.7,
+                    ),
+                )
+                if response and response.text:
+                    return response.text
+            except Exception as e:
+                errores.append(f"Key{idx+1}/{modelo}: {str(e)[:60]}")
+                continue
 
-msg = EmailMessage()
-msg["Subject"] = (
-    f"Reporte Comercial GYAI - Jorge y James ({fecha_actual})"
-)
-msg["From"] = EMAIL_USER
-msg["To"] = destinatario
+    if not gemini_keys and not groq_key:
+        return "⚠️ Falta configurar GROQ_API_KEY o GEMINI_API_KEY en los Secrets de Streamlit."
 
-# Texto plano de respaldo
-msg.set_content(
-    f"Reporte Comercial GYAI - {fecha_actual}\n\nPor favor, visualiza este correo"
-    " en un cliente compatible con HTML para ver las tablas de prospección y"
-    " botones de LinkedIn."
-)
+    return (
+        "⚠️ No se pudo conectar con los motores en este momento.\n\n"
+        f"Detalle técnico: {' | '.join(errores[:2])}"
+    )
 
-# Cuerpo HTML enriquecido
-html_content = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {{
-            font-family: Arial, sans-serif;
-            color: #333333;
-            background-color: #f4f6f9;
-            margin: 0;
-            padding: 10px;
-        }}
-        .email-container {{
-            background-color: #ffffff;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            max-width: 800px;
-            margin: 0 auto;
-        }}
-        h2 {{
-            color: #107C41;
-            font-size: 18px;
-            border-bottom: 2px solid #107C41;
-            padding-bottom: 6px;
-            margin-top: 20px;
-        }}
-        p, li {{
-            font-size: 13px;
-            line-height: 1.4;
-        }}
-        table {{
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 10px;
-            margin-bottom: 20px;
-            font-size: 12px;
-        }}
-        th, td {{
-            border: 1px solid #d0d0d0;
-            text-align: left;
-            padding: 8px;
-            vertical-align: middle;
-        }}
-        th {{
-            background-color: #107C41;
-            color: #ffffff;
-            font-weight: bold;
-        }}
-        tr:nth-child(even) {{
-            background-color: #f9f9f9;
-        }}
-        .header-info {{
-            background-color: #e8f5e9;
-            padding: 10px;
-            border-radius: 6px;
-            margin-bottom: 15px;
-            font-size: 13px;
-        }}
-        .footer {{
-            font-size: 11px;
-            color: #666666;
-            text-align: center;
-            margin-top: 20px;
-            border-top: 1px solid #e0e0e0;
-            padding-top: 10px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="email-container">
-        <h2 style="margin-top: 0; color: #0f5132;">📊 Reporte de Prospección Comercial GYAI</h2>
-        <div class="header-info">
-            <strong>Fecha:</strong> {fecha_actual} (Hora Perú)<br>
-            <strong>Directores:</strong> Jorge (Hispano) & James (Inglés)<br>
-            <strong>Enfoque:</strong> Cierre rápido 24-48h (Negocios en expansión)
+if "escritorio_activo" not in st.session_state:
+    st.session_state.escritorio_activo = "Jorge GYAI"
+if "respuesta_jorge" not in st.session_state:
+    st.session_state.respuesta_jorge = ""
+if "respuesta_james" not in st.session_state:
+    st.session_state.respuesta_james = ""
+
+try:
+    with open("image_2b74a7b8.jpg", "rb") as img_file:
+        img_base64 = base64.b64encode(img_file.read()).decode()
+    st.markdown(f'''
+    <div style="position: relative; max-width: 750px; margin: auto; border-radius: 16px; overflow: hidden; border: 2px solid #00F5D4; box-shadow: 0 0 25px rgba(0, 245, 212, 0.25);">
+        <img src="data:image/jpeg;base64,{img_base64}" style="width: 100%; display: block;">
+        <div style="position: absolute; top: 12px; left: 12px; background: rgba(6,11,25,0.85); padding: 5px 12px; border-radius: 20px; border: 1px solid #10B981; font-size: 12px;">
+            🟢 <b>JORGE GYAI:</b> En línea (Motor Turbo Activo)
         </div>
-        
-        {reporte_html_generado}
-        
-        <div class="footer">
-            Enviado automáticamente por Agente 24/7 - GYAI Systems.
+        <div style="position: absolute; top: 12px; right: 12px; background: rgba(6,11,25,0.85); padding: 5px 12px; border-radius: 20px; border: 1px solid #10B981; font-size: 12px;">
+            🟢 <b>JAMES GYAI:</b> En línea (Motor Turbo Activo)
         </div>
     </div>
-</body>
-</html>
-"""
+    ''', unsafe_allow_html=True)
+except FileNotFoundError:
+    st.warning("⚠️ No se encontró el archivo image_2b74a7b8.jpg en el repositorio.")
 
-msg.add_alternative(html_content, subtype="html")
+st.write("")
 
-# 6. Envío seguro mediante SMTP SSL de Gmail
-try:
-  with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-    server.login(EMAIL_USER, EMAIL_PASS)
-    server.send_message(msg)
-  print(
-      "Reporte comercial en formato HTML enviado exitosamente a"
-      " yanixamalave6@gmail.com"
-  )
-except Exception as e:
-  print(f"Error al enviar el correo: {e}")
+c1, c2, c3 = st.columns(3)
+with c1:
+    if st.button("🏢 Entrar Oficina JORGE", use_container_width=True):
+        st.session_state.escritorio_activo = "Jorge GYAI"
+with c2:
+    if st.button("🌐 Pasillo Central GYAI", use_container_width=True):
+        st.session_state.escritorio_activo = "Pasillo Central"
+with c3:
+    if st.button("🏢 Entrar Oficina JAMES", use_container_width=True):
+        st.session_state.escritorio_activo = "James GYAI"
+
+if st.session_state.escritorio_activo == "Jorge GYAI":
+    st.markdown('''
+    <div class="panel-agente">
+        <h4 style="color:#00F5D4; margin:0;">💻 Escritorio 01: JORGE GYAI (Mercado Latino & España)</h4>
+        <p style="font-size:13px; color:#CBD5E1; margin-top:5px;"><b>Rol:</b> Prospección en español, agendar demos y cierre en Perú, México, Colombia y España.</p>
+        <p style="font-size:13px; color:#38BDF8;"><b>Actividad actual:</b> Preparando mensajes para clínicas dentales y estudios contables.</p>
+    </div>
+    ''', unsafe_allow_html=True)
+    orden_j = st.text_input("✍️ Dar orden directa a Jorge GYAI:", placeholder="Ej: Redacta un mensaje corto de WhatsApp para una clínica dental en Madrid...")
+    if st.button("🚀 Enviar orden a Jorge"):
+        if orden_j.strip():
+            with st.spinner("🧠 Jorge GYAI está redactando tu estrategia..."):
+                rol_jorge = (
+                    "Eres Jorge GYAI, secretario ejecutivo de ventas B2B de la agencia GYAI (Growth & Yield AI), "
+                    "fundada por Dhianays. Tu especialidad es el mercado hispanohablante (Perú, México, Colombia, España). "
+                    "Redacta mensajes persuasivos, directos, profesionales y orientados a agendar una demo de automatización con IA "
+                    "para conseguir los primeros 3 clientes globales de GYAI. Responde siempre en español."
+                )
+                st.session_state.respuesta_jorge = consultar_secretario(orden_j, rol_jorge)
+        else:
+            st.warning("Escribe una orden para Jorge primero.")
+    
+    if st.session_state.respuesta_jorge:
+        st.markdown(f'<div class="respuesta-ia"><b>🤖 Respuesta de Jorge GYAI:</b><br><br>{st.session_state.respuesta_jorge}</div>', unsafe_allow_html=True)
+
+elif st.session_state.escritorio_activo == "James GYAI":
+    st.markdown('''
+    <div class="panel-agente">
+        <h4 style="color:#A855F7; margin:0;">💻 Escritorio 02: JAMES GYAI (Mercado Inglés & Global)</h4>
+        <p style="font-size:13px; color:#CBD5E1; margin-top:5px;"><b>Rol:</b> Prospección High-Ticket en EE. UU., Canadá, Emiratos Árabes y Europa para empresas de servicios.</p>
+        <p style="font-size:13px; color:#E879F9;"><b>Actividad actual:</b> Escaneando empresas en Dubái, Abu Dabi, Singapur y EE. UU.</p>
+    </div>
+    ''', unsafe_allow_html=True)
+    orden_ja = st.text_input("✍️ Dar orden directa a James GYAI:", placeholder="Ej: Write a short WhatsApp follow-up for a luxury transport company in Dubai...")
+    if st.button("🚀 Enviar orden a James"):
+        if orden_ja.strip():
+            with st.spinner("🧠 James GYAI is crafting your high-ticket pitch..."):
+                rol_james = (
+                    "You are James GYAI, Executive Global Sales Secretary at GYAI (Growth & Yield AI), founded by Dhianays. "
+                    "Your specialty is high-ticket B2B outreach in English for service businesses in the UAE (Dubai/Abu Dhabi), Singapore, US, Canada, and Europe. "
+                    "Write sharp, persuasive, ROI-focused outreach messages designed to book discovery demos and land GYAI's global clients. Always respond in English."
+                )
+                st.session_state.respuesta_james = consultar_secretario(orden_ja, rol_james)
+        else:
+            st.warning("Please enter an instruction for James first.")
+
+    if st.session_state.respuesta_james:
+        st.markdown(f'<div class="respuesta-ia" style="border-left-color:#A855F7;"><b>🤖 James GYAI Response:</b><br><br>{st.session_state.respuesta_james}</div>', unsafe_allow_html=True)
+
+else:
+    st.markdown('''
+    <div class="panel-agente" style="border-color:#00F5D4;">
+        <h4 style="color:#00F5D4; margin:0;">🏛️ Recepción & Pasillo Central — GYAI (Growth & Yield AI)</h4>
+                                                              
